@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hidden Cost — Operational Friction Calculator</title>
+<!--
+  FONTS: Inter for body/UI (matches reference), no decorative font needed.
+  Loaded via Google Fonts with display=swap to avoid render blocking.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ─── DESIGN TOKENS ───────────────────────────────────────────────────────────
+   Single source of truth for all colours, spacing, radii.
+   Changing a token here cascades everywhere. */
+:root {
+  --purple:        #5B4FE8;   /* primary accent — buttons, highlights */
+  --purple-light:  #EEF0FF;   /* tinted backgrounds */
+  --purple-mid:    #7B72F0;   /* chart, secondary accent */
+  --ink:           #0D0F1C;   /* near-black body text */
+  --ink-mid:       #4A4D6A;   /* secondary text */
+  --ink-light:     #8B8FA8;   /* tertiary / labels */
+  --border:        #E4E5EF;   /* all borders */
+  --surface:       #F7F8FC;   /* page background */
+  --white:         #FFFFFF;
+  --dark-bg:       #0D0F1C;   /* screen 2 dark panel */
+  --dark-surface:  #1A1D35;   /* cards on dark */
+
+  /* Activity colours — donut chart segments */
+  --c1: #5B4FE8; --c2: #38BDF8; --c3: #34D399;
+  --c4: #FBBF24; --c5: #F87171;
+
+  --radius:   12px;
+  --radius-sm: 8px;
+  --font:     'Inter', sans-serif;
+}
+
+/* ─── RESET ───────────────────────────────────────────────────────────────────
+   Box-sizing globally; strip margin/padding only where needed. */
+*, *::before, *::after { box-sizing: border-box; }
+body, h1, h2, h3, p, ul, li { margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  background: var(--surface);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── SCREEN SYSTEM ───────────────────────────────────────────────────────────
+   Each .screen is full-viewport, hidden by default.
+   JS toggles .active to show/hide. No JS animation library needed —
+   opacity + translate handled in CSS. */
+.screen {
+  display: none;
+  min-height: 100vh;
+  flex-direction: column;
+}
+.screen.active { display: flex; }
+
+/* ─── SHARED HEADER ───────────────────────────────────────────────────────────
+   Logo + step counter reused across all 4 screens. */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+}
+/* Bar-chart icon built in pure CSS — no SVG or image needed */
+.logo-icon {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+}
+.logo-icon span {
+  display: block;
+  width: 3px;
+  background: var(--purple);
+  border-radius: 1px;
+}
+.logo-icon span:nth-child(1) { height: 8px; }
+.logo-icon span:nth-child(2) { height: 12px; }
+.logo-icon span:nth-child(3) { height: 16px; }
+.logo-icon span:nth-child(4) { height: 10px; }
+
+.step-badge {
+  font-size: 13px;
+  color: var(--ink-mid);
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+}
+
+/* ─── SCREEN 1: ESTIMATE ──────────────────────────────────────────────────────
+   Light background, two-section form, sticky CTA at bottom. */
+#s1 { background: var(--white); }
+
+.s1-body {
+  flex: 1;
+  padding: 8px 24px 24px;
+  max-width: 520px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.s1-headline {
+  font-size: clamp(26px, 5vw, 34px);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  margin-bottom: 12px;
+}
+/* Italic purple "operational friction?" matches reference exactly */
+.s1-headline em {
+  font-style: italic;
+  color: var(--purple);
+}
+.s1-sub {
+  font-size: 15px;
+  color: var(--ink-mid);
+  line-height: 1.5;
+  margin-bottom: 32px;
+}
+
+/* Form sections */
+.form-section { margin-bottom: 28px; }
+.form-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+
+/* Two-column input row */
+.input-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.input-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-light);
+  margin-bottom: 6px;
+}
+/* Tooltip circle — CSS only */
+.tip {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-light);
+  cursor: help;
+}
+
+/* Input wrapper: puts suffix ("people", "/hr") inside the field visually */
+.input-wrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  overflow: hidden;
+  transition: border-color .15s;
+}
+.input-wrap:focus-within { border-color: var(--purple); }
+.input-wrap input {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 10px 12px;
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  width: 0; /* allows flex to control width */
+  -moz-appearance: textfield;
+}
+.input-wrap input::-webkit-outer-spin-button,
+.input-wrap input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.input-wrap .suffix {
+  padding: 0 12px 0 4px;
+  font-size: 13px;
+  color: var(--ink-light);
+  white-space: nowrap;
+}
+
+/* Currency toggle lives inside the average cost field */
+.currency-toggle {
+  display: flex;
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+.currency-toggle button {
+  padding: 0 10px;
+  border: none;
+  background: none;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-light);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  height: 100%;
+}
+.currency-toggle button.on {
+  background: var(--purple);
+  color: var(--white);
+}
+
+/* Activity checklist */
+.activity-list { display: flex; flex-direction: column; gap: 8px; }
+.activity-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  user-select: none;
+}
+.activity-item.checked {
+  border-color: var(--purple);
+  background: var(--purple-light);
+}
+.activity-left { display: flex; align-items: center; gap: 12px; }
+/* Activity icon: simple coloured rounded square */
+.act-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.act-text-title { font-size: 14px; font-weight: 500; }
+.act-text-sub   { font-size: 12px; color: var(--ink-light); margin-top: 1px; }
+/* Checkbox — pure CSS, no custom SVG needed */
+.act-check {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: background .15s, border-color .15s;
+  font-size: 11px;
+  color: transparent;
+}
+.activity-item.checked .act-check {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: var(--white);
+}
+
+/* CTA button + footer note */
+.s1-footer { padding: 0 24px 32px; max-width: 520px; margin: 0 auto; width: 100%; }
+.btn-primary {
+  width: 100%;
+  padding: 16px;
+  background: var(--ink);
+  color: var(--white);
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background .15s;
+}
+.btn-primary:hover { background: #1a1d35; }
+.btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+.no-signup {
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-light);
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* ─── SCREEN 2: COST REVEAL ───────────────────────────────────────────────────
+   Dark background, large headline number, area chart, 3 stat pills. */
+#s2 {
+  background: var(--dark-bg);
+  color: var(--white);
+}
+#s2 .header .logo { color: var(--white); }
+#s2 .step-badge { background: var(--dark-surface); border-color: #2a2d4a; color: #8B8FA8; }
+
+.s2-body {
+  flex: 1;
+  padding: 0 24px;
+  max-width: 520px;
+  margin: 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.s2-eyebrow {
+  font-size: 14px;
+  color: #8B8FA8;
+  text-align: center;
+  margin-bottom: 4px;
+}
+.s2-title {
+  font-size: 22px;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 16px;
+}
+/* Big number — the centrepiece of screen 2 */
+.s2-figure {
+  font-size: clamp(52px, 12vw, 76px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  text-align: center;
+  color: var(--purple-mid);
+  line-height: 1;
+  margin-bottom: 16px;
+}
+/* Pill showing selected parameters — summary of screen 1 inputs */
+.s2-params {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  background: var(--dark-surface);
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #8B8FA8;
+  margin: 0 auto 28px;
+  width: fit-content;
+}
+.s2-params span { padding: 0 6px; }
+.s2-params .dot { opacity: .4; }
+
+/* Three insight pills: hours/FTEs/monthly */
+.s2-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.insight-pill {
+  background: var(--dark-surface);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.insight-icon {
+  width: 40px; height: 40px;
+  background: rgba(91,79,232,.2);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.insight-value { font-size: 22px; font-weight: 700; }
+.insight-label { font-size: 12px; color: #8B8FA8; margin-top: 1px; }
+
+/* Sparkline area chart — drawn on a <canvas> element */
+.chart-wrap {
+  position: relative;
+  margin-bottom: 16px;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+canvas#sparkline { width: 100%; display: block; }
+
+/* Cost layers CTA */
+.s2-cta {
+  text-align: center;
+  padding-bottom: 28px;
+  margin-top: auto;
+}
+.s2-cta-text { font-size: 14px; color: #8B8FA8; margin-bottom: 8px; }
+.s2-cta p { font-size: 13px; color: #8B8FA8; margin-top: 8px; line-height: 1.5; }
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  border: 1px solid #2a2d4a;
+  border-radius: 20px;
+  background: none;
+  color: var(--purple-mid);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s;
+}
+.btn-ghost:hover { background: var(--dark-surface); }
+
+/* ─── SCREEN 3: COST BREAKDOWN ────────────────────────────────────────────────
+   Light. Donut chart + tabbed toggle + cost layer table. */
+#s3 { background: var(--white); }
+
+.s3-body {
+  flex: 1;
+  padding: 0 24px 32px;
+  max-width: 520px;
+  margin: 0 auto;
+  width: 100%;
+}
+.s3-headline {
+  font-size: clamp(26px, 5vw, 34px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin-bottom: 20px;
+}
+/* Purple underline accent below headline */
+.s3-headline::after {
+  content: '';
+  display: block;
+  width: 32px;
+  height: 3px;
+  background: var(--purple);
+  border-radius: 2px;
+  margin-top: 10px;
+}
+
+/* Tab toggle: "Annual cost" / "% of total" */
+.tab-row {
+  display: flex;
+  background: var(--surface);
+  border-radius: 20px;
+  padding: 3px;
+  margin-bottom: 24px;
+  width: fit-content;
+}
+.tab-btn {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 20px;
+  background: none;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-light);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.tab-btn.on {
+  background: var(--ink);
+  color: var(--white);
+}
+
+/* Donut chart — drawn on canvas */
+.donut-wrap {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  margin: 0 auto 24px;
+}
+canvas#donut { width: 100%; height: 100%; }
+/* Centre label overlay — positioned absolutely over canvas */
+.donut-centre {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.donut-centre-val { font-size: 22px; font-weight: 700; }
+.donut-centre-lbl { font-size: 11px; color: var(--ink-light); margin-top: 2px; }
+
+/* Activity breakdown list */
+.breakdown-list { margin-bottom: 24px; }
+.breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.breakdown-row:last-child { border-bottom: none; }
+.b-left { display: flex; align-items: center; gap: 10px; }
+.b-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.b-name { font-size: 14px; font-weight: 500; }
+.b-sub  { font-size: 12px; color: var(--ink-light); }
+.b-right { text-align: right; }
+.b-val  { font-size: 14px; font-weight: 600; }
+.b-pct  { font-size: 12px; color: var(--ink-light); }
+
+/* Total + cost layers summary card */
+.total-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.total-card-label { font-size: 12px; color: var(--ink-light); margin-bottom: 6px; }
+.total-card-val   { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; }
+
+.cost-layers-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+  text-align: center;
+}
+.layer-col { padding: 10px 4px; }
+.layer-col.mid {
+  background: var(--purple-light);
+  border-radius: var(--radius-sm);
+}
+.layer-col-lbl  { font-size: 11px; color: var(--ink-light); line-height: 1.3; }
+.layer-col-sub  { font-size: 10px; color: var(--ink-light); }
+.layer-col-val  { font-size: 15px; font-weight: 700; margin-top: 4px; }
+.layer-col.mid .layer-col-val { color: var(--purple); }
+
+/* Link to screen 4 */
+.s3-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--purple);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font);
+}
+
+/* ─── SCREEN 4: METHODOLOGY ───────────────────────────────────────────────────
+   Clean editorial layout. Three cost-layer cards + rationale copy. */
+#s4 { background: var(--white); }
+
+.s4-body {
+  flex: 1;
+  padding: 0 24px 40px;
+  max-width: 520px;
+  margin: 0 auto;
+  width: 100%;
+}
+.s4-headline {
+  font-size: clamp(26px, 5vw, 34px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin-bottom: 10px;
+}
+.s4-headline::after {
+  content: '';
+  display: block;
+  width: 32px;
+  height: 3px;
+  background: var(--purple);
+  border-radius: 2px;
+  margin-top: 10px;
+}
+.s4-intro {
+  font-size: 14px;
+  color: var(--ink-mid);
+  line-height: 1.6;
+  margin: 16px 0 24px;
+}
+.s4-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.s4-section-sub {
+  font-size: 13px;
+  color: var(--ink-mid);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+/* Cost layer explanation cards */
+.layer-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.layer-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.layer-card-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  background: var(--purple-light);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.layer-card-name { font-size: 15px; font-weight: 600; }
+.layer-card-desc { font-size: 13px; color: var(--ink-mid); }
+/* Formula display */
+.formula {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-bottom: 8px;
+}
+/* Tag pills for what's included */
+.tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+.tag-purple { background: var(--purple-light); color: var(--purple); }
+.tag-blue   { background: #EFF8FF; color: #2563EB; }
+.tag-green  { background: #F0FDF4; color: #16A34A; }
+
+.why-matters {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 20px;
+}
+.why-matters h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+.why-matters p  { font-size: 13px; color: var(--ink-mid); line-height: 1.6; }
+
+/* Nav buttons shared across screens */
+.nav-row {
+  display: flex;
+  gap: 10px;
+  padding: 16px 24px 24px;
+  max-width: 520px;
+  margin: 0 auto;
+  width: 100%;
+}
+.btn-back {
+  flex: 1;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--white);
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink-mid);
+  cursor: pointer;
+  transition: background .15s;
+}
+.btn-back:hover { background: var(--surface); }
+.btn-next {
+  flex: 2;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--white);
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background .15s;
+}
+.btn-next:hover { background: #1a1d35; }
+/* Dark screen variant */
+.btn-next.dark-variant {
+  background: var(--purple);
+}
+.btn-next.dark-variant:hover { background: #4a3fd4; }
+
+/* ─── UTILITY ─────────────────────────────────────────────────────────────────
+   Reused across screens. */
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 20px 0;
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SCREEN 1 — ESTIMATE
+     Inputs: team size, hourly cost, activity selection.
+     All values stored in JS state object before proceeding.
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="s1" class="screen active">
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      Hidden Cost
+    </div>
+    <div class="step-badge">1 of 4</div>
+  </div>
+
+  <div class="s1-body">
+    <h1 class="s1-headline">
+      What does your organisation spend on <em>operational friction?</em>
+    </h1>
+    <p class="s1-sub">Answer a few questions to estimate the true cost of work that slows you down.</p>
+
+    <!-- Team inputs -->
+    <div class="form-section">
+      <div class="form-section-title">1. Your team</div>
+      <div class="input-row">
+        <div class="input-group">
+          <label>Number of people <span class="tip" title="Total headcount affected by these activities">?</span></label>
+          <div class="input-wrap">
+            <input type="number" id="inp-people" min="1" max="10000" placeholder="25">
+            <span class="suffix">people</span>
+          </div>
+        </div>
+        <div class="input-group">
+          <label>Average hourly cost <span class="tip" title="Fully-loaded cost per person. Defaults to national average for knowledge workers.">?</span></label>
+          <div class="input-wrap">
+            <input type="number" id="inp-rate" min="1" max="9999" placeholder="24">
+            <span class="suffix" id="rate-suffix">/hr</span>
+            <!-- Currency toggle embedded in the field -->
+            <div class="currency-toggle">
+              <button id="btn-gbp" class="on" onclick="setCurrency('GBP')">£</button>
+              <button id="btn-usd" onclick="setCurrency('USD')">$</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activity selection -->
+    <div class="form-section">
+      <div class="form-section-title">2. Which activities exist in your organisation?</div>
+      <p style="font-size:12px;color:var(--ink-light);margin-bottom:12px">Select all that apply.</p>
+      <div class="activity-list" id="activity-list"></div>
+    </div>
+  </div>
+
+  <div class="s1-footer">
+    <button class="btn-primary" id="btn-estimate" onclick="goTo(2)" disabled>
+      Estimate hidden cost <span>→</span>
+    </button>
+    <div class="no-signup">🔒 No sign up required</div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SCREEN 2 — COST REVEAL
+     Dark panel. Big number. 3 insight pills. Sparkline chart.
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="s2" class="screen">
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      Hidden Cost
+    </div>
+    <div class="step-badge">2 of 4</div>
+  </div>
+
+  <div class="s2-body">
+    <div class="s2-eyebrow">Your estimated</div>
+    <div class="s2-title">annual cost</div>
+    <!-- Moderate figure leads as the headline number -->
+    <div class="s2-figure" id="s2-figure">—</div>
+    <!-- Parameter summary pill -->
+    <div class="s2-params" id="s2-params">—</div>
+
+    <!-- Three insight stats -->
+    <div class="s2-insights">
+      <div class="insight-pill">
+        <div class="insight-icon">⏱</div>
+        <div>
+          <div class="insight-value" id="ins-hours">—</div>
+          <div class="insight-label">hours per year — time lost to low-value work</div>
+        </div>
+      </div>
+      <div class="insight-pill">
+        <div class="insight-icon">👤</div>
+        <div>
+          <div class="insight-value" id="ins-ftes">—</div>
+          <div class="insight-label">full-time employees — equivalent capacity consumed</div>
+        </div>
+      </div>
+      <div class="insight-pill">
+        <div class="insight-icon">💷</div>
+        <div>
+          <div class="insight-value" id="ins-monthly">—</div>
+          <div class="insight-label">per month — lost to operational friction</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sparkline: cumulative cost over 12 months -->
+    <div class="chart-wrap">
+      <canvas id="sparkline" height="120"></canvas>
+    </div>
+
+    <div class="s2-cta">
+      <div class="s2-cta-text">This is your <strong>moderate view.</strong></div>
+      <p>We show three cost layers so you can choose the story that best fits your audience.</p>
+    </div>
+  </div>
+
+  <div class="nav-row" style="background:var(--dark-bg)">
+    <button class="btn-back" style="background:#1a1d35;border-color:#2a2d4a;color:#8B8FA8" onclick="goTo(1)">← Back</button>
+    <button class="btn-next dark-variant" onclick="goTo(3)">View all cost layers →</button>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SCREEN 3 — COST BREAKDOWN
+     Donut chart + tabbed list + three-column cost layer table.
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="s3" class="screen">
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      Hidden Cost
+    </div>
+    <div class="step-badge">3 of 4</div>
+  </div>
+
+  <div class="s3-body">
+    <h2 class="s3-headline">Where your cost comes from</h2>
+
+    <!-- Tab toggle -->
+    <div class="tab-row">
+      <button class="tab-btn on" onclick="setTab('value',this)">Annual cost</button>
+      <button class="tab-btn" onclick="setTab('pct',this)">% of total</button>
+    </div>
+
+    <!-- Donut chart -->
+    <div class="donut-wrap">
+      <canvas id="donut"></canvas>
+      <div class="donut-centre">
+        <div class="donut-centre-val" id="donut-centre-val">—</div>
+        <div class="donut-centre-lbl">Total annual cost</div>
+      </div>
+    </div>
+
+    <!-- Activity breakdown list, rendered by JS -->
+    <div class="breakdown-list" id="breakdown-list"></div>
+
+    <!-- Total + three cost layers -->
+    <div class="total-card">
+      <div class="total-card-label">Total annual cost (moderate)</div>
+      <div class="total-card-val" id="s3-total-val">—</div>
+    </div>
+
+    <div class="cost-layers-row" id="cost-layers-row"></div>
+
+    <div class="divider"></div>
+    <button class="s3-link" onclick="goTo(4)">How we calculate this →</button>
+  </div>
+
+  <div class="nav-row">
+    <button class="btn-back" onclick="goTo(2)">← Back</button>
+    <button class="btn-next" onclick="goTo(4)">Methodology →</button>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SCREEN 4 — METHODOLOGY
+     Editorial trust layer. Three cost model cards. Rationale copy.
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="s4" class="screen">
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      Hidden Cost
+    </div>
+    <div class="step-badge">4 of 4</div>
+  </div>
+
+  <div class="s4-body">
+    <h2 class="s4-headline">How we calculated this</h2>
+    <p class="s4-intro">
+      Hidden Cost estimates the cumulative impact of routine activities that consume time across reporting,
+      communication, alignment and internal servicing work.
+    </p>
+
+    <div class="s4-section-title">Cost layers</div>
+    <p class="s4-section-sub">We show three views so you can choose the story that fits your audience.</p>
+
+    <!-- Conservative -->
+    <div class="layer-card">
+      <div class="layer-card-header">
+        <div class="layer-card-icon">🛡</div>
+        <div>
+          <div class="layer-card-name">Conservative</div>
+          <div class="layer-card-desc">Direct labour cost only.</div>
+        </div>
+      </div>
+      <div class="formula">Hours × People × Hourly Cost</div>
+      <div class="tag-row">
+        <span class="tag tag-purple">Direct labour</span>
+      </div>
+    </div>
+
+    <!-- Moderate -->
+    <div class="layer-card">
+      <div class="layer-card-header">
+        <div class="layer-card-icon">📊</div>
+        <div>
+          <div class="layer-card-name">Moderate</div>
+          <div class="layer-card-desc">Direct labour plus organisational overhead.</div>
+        </div>
+      </div>
+      <div class="formula">Conservative × 1.3</div>
+      <div class="tag-row">
+        <span class="tag tag-purple">Employer costs</span>
+        <span class="tag tag-blue">Tools &amp; systems</span>
+        <span class="tag tag-green">Management overhead</span>
+      </div>
+    </div>
+
+    <!-- Aggressive -->
+    <div class="layer-card">
+      <div class="layer-card-header">
+        <div class="layer-card-icon">🎯</div>
+        <div>
+          <div class="layer-card-name">Aggressive</div>
+          <div class="layer-card-desc">Full opportunity cost.</div>
+        </div>
+      </div>
+      <div class="formula">Moderate × 1.5</div>
+      <div class="tag-row">
+        <span class="tag tag-purple">Delayed decisions</span>
+        <span class="tag tag-blue">Missed analytical capacity</span>
+        <span class="tag tag-green">Time diverted from higher-value work</span>
+      </div>
+    </div>
+
+    <!-- Why this matters -->
+    <div class="why-matters">
+      <h3>Why this matters</h3>
+      <p>
+        Operational friction is rarely visible in a single process.
+        By quantifying the total time lost across multiple activities,
+        we make the invisible cost visible — so you can prioritise
+        what will have the biggest impact.
+      </p>
+    </div>
+  </div>
+
+  <div class="nav-row">
+    <button class="btn-back" onclick="goTo(3)">← Back</button>
+    <button class="btn-next" onclick="goTo(1)">Start over</button>
+  </div>
+</section>
+
+
+<script>
+/* ─── DATA ────────────────────────────────────────────────────────────────────
+   Activity definitions. hours = assumed weekly hours per person for this type.
+   This drives the per-activity cost split on screen 3.
+   Colours match --c1 through --c5 CSS vars. */
+const ACTIVITIES = [
+  { id:'rep',  label:'Manual reporting',            sub:'Building reports and responding to information requests', icon:'📊', color:'#5B4FE8', hours:4   },
+  { id:'pres', label:'Presentation & communication',sub:'Creating slides, updates and status reports',             icon:'📋', color:'#38BDF8', hours:3   },
+  { id:'mtg',  label:'Alignment & meetings',         sub:'Internal meetings and alignment time',                   icon:'👥', color:'#34D399', hours:3   },
+  { id:'int',  label:'Interrupt work',               sub:'Unplanned requests and ad-hoc tasks',                   icon:'⚡', color:'#FBBF24', hours:2   },
+  { id:'svc',  label:'Internal requests',            sub:'Serving other teams and stakeholders',                   icon:'✉️', color:'#F87171', hours:1.5 },
+];
+
+/* Default hourly rates — fully loaded knowledge worker averages.
+   UK: ONS 2025 median + NI/pension. US: BLS April 2026 + overhead. */
+const DEFAULTS = { GBP: 24, USD: 42 };
+const SYMBOLS  = { GBP: '£', USD: '$' };
+
+/* ─── STATE ───────────────────────────────────────────────────────────────────
+   Single mutable object. All reads/writes go through here.
+   No framework needed for 4 screens of linear state. */
+const S = {
+  currency: 'GBP',
+  people:   0,
+  rate:     DEFAULTS.GBP,
+  selected: new Set(ACTIVITIES.map(a => a.id)), // all checked by default
+  tab:      'value', // screen 3 tab: 'value' | 'pct'
+};
+
+/* ─── HELPERS ─────────────────────────────────────────────────────────────────
+   fmt: compact currency string (1.25M, 104k, 42).
+   fmtFull: unabbreviated with locale commas. */
+const sym = () => SYMBOLS[S.currency];
+function fmt(n) {
+  if (!n) return '—';
+  if (n >= 1e6) return sym() + (n/1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return sym() + Math.round(n/1e3) + 'k';
+  return sym() + Math.round(n);
+}
+function fmtFull(n) {
+  return sym() + Math.round(n).toLocaleString('en-GB');
+}
+
+/* ─── COST CALCULATIONS ───────────────────────────────────────────────────────
+   Conservative = hours × people × rate × 52 (annual).
+   Moderate     = conservative × 1.3.
+   Aggressive   = moderate × 1.5.
+   Per-activity split: proportional to declared hours weighting. */
+function calcCosts() {
+  const active = ACTIVITIES.filter(a => S.selected.has(a.id));
+  const totalHours = active.reduce((s,a) => s + a.hours, 0); // hrs/person/week
+  const annualBase = totalHours * S.people * S.rate * 52;
+  return {
+    conservative: annualBase,
+    moderate:     annualBase * 1.3,
+    aggressive:   annualBase * 1.3 * 1.5,
+    perActivity:  active.map(a => ({
+      ...a,
+      annual: (a.hours / totalHours) * annualBase,
+      pct:    (a.hours / totalHours) * 100,
+    })),
+    totalHours,
+  };
+}
+
+/* ─── SCREEN NAVIGATION ───────────────────────────────────────────────────────
+   Shows one screen, hides others, populates dynamic content on entry. */
+function goTo(n) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('s'+n).classList.add('active');
+  window.scrollTo(0,0);
+  if (n === 2) populateS2();
+  if (n === 3) populateS3();
+}
+
+/* ─── SCREEN 1 SETUP ──────────────────────────────────────────────────────────
+   Build activity checklist from ACTIVITIES array. Attach input listeners. */
+function buildS1() {
+  const list = document.getElementById('activity-list');
+  ACTIVITIES.forEach(a => {
+    const div = document.createElement('div');
+    div.className = 'activity-item checked';
+    div.dataset.id = a.id;
+    div.innerHTML = `
+      <div class="activity-left">
+        <div class="act-icon" style="background:${a.color}22">${a.icon}</div>
+        <div>
+          <div class="act-text-title">${a.label}</div>
+          <div class="act-text-sub">${a.sub}</div>
+        </div>
+      </div>
+      <div class="act-check">✓</div>`;
+    div.addEventListener('click', () => toggleActivity(a.id, div));
+    list.appendChild(div);
+  });
+
+  /* Input listeners: read people/rate into state, validate CTA */
+  document.getElementById('inp-people').addEventListener('input', e => {
+    S.people = parseFloat(e.target.value) || 0;
+    validateS1();
+  });
+  document.getElementById('inp-rate').addEventListener('input', e => {
+    S.rate = parseFloat(e.target.value) || DEFAULTS[S.currency];
+    validateS1();
+  });
+}
+
+function toggleActivity(id, el) {
+  if (S.selected.has(id)) {
+    S.selected.delete(id);
+    el.classList.remove('checked');
+  } else {
+    S.selected.add(id);
+    el.classList.add('checked');
+  }
+  validateS1();
+}
+
+/* CTA enabled only when people > 0 and at least 1 activity selected */
+function validateS1() {
+  document.getElementById('btn-estimate').disabled =
+    S.people < 1 || S.selected.size === 0;
+}
+
+/* ─── CURRENCY TOGGLE ─────────────────────────────────────────────────────────
+   Swaps symbol, resets rate to national default, updates input placeholder. */
+function setCurrency(c) {
+  S.currency = c;
+  S.rate = DEFAULTS[c];
+  document.getElementById('btn-gbp').classList.toggle('on', c==='GBP');
+  document.getElementById('btn-usd').classList.toggle('on', c==='USD');
+  const inp = document.getElementById('inp-rate');
+  inp.placeholder = DEFAULTS[c];
+  /* Only reset if user hasn't manually changed it */
+  if (!inp.dataset.touched) inp.value = '';
+}
+document.getElementById('inp-rate').addEventListener('input', e => {
+  e.target.dataset.touched = '1';
+});
+
+/* ─── SCREEN 2: POPULATE ──────────────────────────────────────────────────────
+   Fills headline, params pill, insight stats, draws sparkline. */
+function populateS2() {
+  const c = calcCosts();
+  const mod = c.moderate;
+  const active = ACTIVITIES.filter(a => S.selected.has(a.id));
+
+  document.getElementById('s2-figure').textContent = fmt(mod);
+  document.getElementById('s2-params').innerHTML =
+    `<span>All ${active.length} activities</span><span class="dot">·</span>` +
+    `<span>${S.people} people</span><span class="dot">·</span>` +
+    `<span>${sym()}${S.rate}/hr</span>`;
+
+  /* Hours: total weekly hours per person × people × 52 */
+  const annualHours = Math.round(c.totalHours * S.people * 52);
+  document.getElementById('ins-hours').textContent = annualHours.toLocaleString('en-GB');
+
+  /* FTE equivalent: annual hours / 1820 (35hr week × 52) */
+  document.getElementById('ins-ftes').textContent = Math.round(annualHours / 1820);
+
+  document.getElementById('ins-monthly').textContent = fmt(mod / 12);
+
+  drawSparkline(mod);
+}
+
+/* Sparkline: exponential-ish cumulative cost curve over 12 months.
+   Pure canvas — no chart library. Gradient fill for polish. */
+function drawSparkline(annual) {
+  const canvas = document.getElementById('sparkline');
+  const W = canvas.offsetWidth || 460;
+  const H = 120;
+  canvas.width = W * devicePixelRatio;
+  canvas.height = H * devicePixelRatio;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+
+  /* Generate 12 data points with slight acceleration */
+  const pts = Array.from({length:12}, (_,i) => ({
+    x: (i / 11) * W,
+    y: H - (H - 20) * Math.pow((i+1)/12, 1.2),
+  }));
+
+  /* Gradient fill */
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, 'rgba(123,114,240,.35)');
+  grad.addColorStop(1, 'rgba(123,114,240,.02)');
+
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  pts.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  /* Line */
+  ctx.beginPath();
+  pts.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y));
+  ctx.strokeStyle = '#7B72F0';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  /* Dots */
+  pts.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
+    ctx.fillStyle = '#7B72F0';
+    ctx.fill();
+  });
+
+  /* End-point label */
+  const lx = pts[11].x, ly = pts[11].y;
+  const label = fmt(annual);
+  ctx.fillStyle = '#1A1D35';
+  const lw = ctx.measureText(label).width + 20;
+  const lh = 28;
+  const lxOff = Math.min(lx - lw/2, W - lw - 4);
+  roundRect(ctx, lxOff, ly - lh - 8, lw, lh, 6);
+  ctx.fillStyle = '#1A1D35';
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = '600 12px Inter';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, lxOff + lw/2, ly - lh/2 - 8 + 9);
+
+  /* Sub-label */
+  ctx.fillStyle = '#8B8FA8';
+  ctx.font = '11px Inter';
+  ctx.fillText('Annual cost', lxOff + lw/2, ly - lh/2 - 8 + 21);
+}
+
+/* Tiny helper: canvas rounded rect path */
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+
+/* ─── SCREEN 3: POPULATE ──────────────────────────────────────────────────────
+   Donut chart (canvas), breakdown list, cost layer columns. */
+function populateS3() {
+  const c = calcCosts();
+
+  document.getElementById('donut-centre-val').textContent = fmt(c.moderate);
+  document.getElementById('s3-total-val').textContent = fmtFull(c.moderate);
+
+  renderBreakdown(c);
+  drawDonut(c);
+  renderCostLayers(c);
+}
+
+function setTab(tab, btn) {
+  S.tab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  renderBreakdown(calcCosts());
+}
+
+function renderBreakdown(c) {
+  const list = document.getElementById('breakdown-list');
+  list.innerHTML = c.perActivity.map(a => `
+    <div class="breakdown-row">
+      <div class="b-left">
+        <div class="b-dot" style="background:${a.color}"></div>
+        <div>
+          <div class="b-name">${a.label}</div>
+        </div>
+      </div>
+      <div class="b-right">
+        <div class="b-val">${S.tab==='value' ? fmtFull(a.annual) : a.pct.toFixed(1)+'%'}</div>
+        <div class="b-pct">${S.tab==='value' ? a.pct.toFixed(1)+'%' : fmtFull(a.annual)}</div>
+      </div>
+    </div>`).join('');
+}
+
+/* Donut: pure canvas. Segments drawn proportionally by hours weighting. */
+function drawDonut(c) {
+  const canvas = document.getElementById('donut');
+  const SIZE = 220;
+  canvas.width = SIZE * devicePixelRatio;
+  canvas.height = SIZE * devicePixelRatio;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+
+  const cx = SIZE/2, cy = SIZE/2, r = 90, inner = 58;
+  let angle = -Math.PI/2;
+
+  c.perActivity.forEach(a => {
+    const slice = (a.pct/100) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, angle, angle+slice);
+    ctx.closePath();
+    ctx.fillStyle = a.color;
+    ctx.fill();
+    angle += slice;
+  });
+
+  /* Punch out the centre (donut hole) */
+  ctx.beginPath();
+  ctx.arc(cx, cy, inner, 0, Math.PI*2);
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+}
+
+function renderCostLayers(c) {
+  document.getElementById('cost-layers-row').innerHTML = `
+    <div class="layer-col">
+      <div class="layer-col-lbl">Conservative</div>
+      <div class="layer-col-sub">(Direct labour)</div>
+      <div class="layer-col-val">${fmtFull(c.conservative)}</div>
+    </div>
+    <div class="layer-col mid">
+      <div class="layer-col-lbl">Moderate</div>
+      <div class="layer-col-sub">(Labour + overhead)</div>
+      <div class="layer-col-val">${fmtFull(c.moderate)}</div>
+    </div>
+    <div class="layer-col">
+      <div class="layer-col-lbl">Aggressive</div>
+      <div class="layer-col-sub">(Full opportunity)</div>
+      <div class="layer-col-val">${fmtFull(c.aggressive)}</div>
+    </div>`;
+}
+
+/* ─── INIT ────────────────────────────────────────────────────────────────────
+   Build screen 1 on page load. Everything else is lazy (built on goTo). */
+buildS1();
+</script>
+</body>
+</html>
